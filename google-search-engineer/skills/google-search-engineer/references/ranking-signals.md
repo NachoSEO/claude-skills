@@ -1,8 +1,55 @@
 # Google Ranking Signals Reference
 
-Complete reference of ranking signals from the Google API Content Warehouse v0.4.0 leak, organized by category.
+Complete reference of ranking signals from the Google API Content Warehouse v0.4.0 leak and the DOJ v. Google antitrust trial evidence, organized by category.
 
-Source: https://hexdocs.pm/google_api_content_warehouse/0.4.0/api-reference.html
+Sources:
+- Content Warehouse API v0.4.0: https://hexdocs.pm/google_api_content_warehouse/0.4.0/api-reference.html
+- DOJ v. Google (2020): United States v. Google LLC, Case No. 20-cv-3010 (D.D.C.)
+- DOJ v. Google (2023): United States v. Google LLC, Case No. 23-cv-108 (E.D. Va.)
+
+---
+
+## 0. Confirmed Ranking Architecture (DOJ Trial Evidence)
+
+### Top-Level Scoring Formula
+
+The final ranking score combines four high-level buckets (confirmed by HJ Kim, NavBoost creator, Feb 2025):
+
+| Bucket | Internal Name | Description | Query-Dependent? |
+|--------|--------------|-------------|-----------------|
+| Topicality | T* | Combines ABC signals (Anchors, Body, Clicks) to judge relevance | Yes — always tied to query |
+| NavBoost | — | Click-and-query behavior data from 13 months of Glue logs | Yes — per query-URL pair |
+| Quality | Q* | Page/site trustworthiness and authority. PageRank is an input. | Mostly static, sometimes query-influenced |
+| Popularity | P* | Chrome visit data, anchor counts, NavBoost data | No — largely static |
+
+### Confirmed Ranking Systems (Trial Testimony)
+
+| System | Type | Description | Source |
+|--------|------|-------------|--------|
+| NavBoost | Hand-crafted | "Giant table" aggregating 13 months of click-and-query data from Glue. "One of the most powerful ranking components historically." | Lehman, Nayak testimony |
+| Glue | Data warehouse | "Super query log" — collects query text, language, location, device, ranking info, SERP interactions (clicks/hovers/duration), query interpretation | Allan testimony (Remedies) |
+| Instant Glue | Real-time feed | Real-time NavBoost signals with ~10-minute latency | Trial evidence |
+| QBST | Hand-crafted | Query-Based Salient Terms — pairs query text to document terms | Lehman testimony |
+| RankBrain | ML (generalization) | Handles long-tail queries. Uses ~1 billion training examples (vs 1 trillion for older systems) | Lehman testimony |
+| RankEmbed / RankEmbedBERT | Deep learning | Deep learning ranking model trained on user logs | Allan testimony |
+| DeepRank | Deep learning (BERT) | Uses BERT transformers. "Designed to fill holes in click data" | Lehman testimony |
+| eDeepRank | LLM decomposition | Decomposes LLM signals into transparent components | HJ Kim interview |
+| MUM | LLM | "Achieved essentially human-level performance" on scoring metrics. Trained on web corpus + some click data | Lehman, Nayak testimony |
+| PageRank | Hand-crafted | "Single signal relating to distance from a known good source." Input to Q* | HJ Kim interview |
+| Tangram (fka Tetris) | Framework | Applies ranking principles across all search features (Knowledge Panels, etc.) | HJ Kim interview |
+| SpamBrain | ML | Spam detection at document, domain, and site-chunk levels | Content Warehouse API |
+
+### Key Scale Facts (Judge Mehta's Findings)
+
+| Metric | Value | Source |
+|--------|-------|--------|
+| Google daily queries vs all rivals | 9x more (19x on mobile) | Liability Opinion ¶87 |
+| Unique query phrases seen only by Google | 93% (98.4% on mobile) | Liability Opinion ¶89 |
+| Tail queries on mobile not seen by Bing | 99.8% | Liability Opinion ¶89 |
+| NavBoost training window | 13 months (was 18 pre-2017) | Nayak testimony |
+| Equivalent Bing data for 13mo Google NavBoost | >17 years | Whinston/Oard testimony |
+| Google's 2021 default placement payments | $26+ billion | Liability Opinion |
+| Google's search advertising revenue (2021) | $146+ billion | Liability Opinion |
 
 ---
 
@@ -458,3 +505,84 @@ Source: https://hexdocs.pm/google_api_content_warehouse/0.4.0/api-reference.html
 | EMD penalty | CompressedQualitySignals | `exactMatchDomainDemotion` |
 | YMYL | PerDocData | `ymylHealthScore`, `ymylNewsScore` |
 | Independence | PerDocData | `ScaledIndyRank` |
+
+---
+
+## 14. Glue Data Structure (Court-Confirmed, Remedies Trial)
+
+Glue is Google's "super query log" — the foundational data warehouse for user interaction signals. From expert testimony (Dr. Allan) during the remedies trial:
+
+### Glue Contains 4 Categories of Data
+
+| Category | Data Points |
+|----------|-------------|
+| Query data | Query text, language, user location, user device type |
+| Ranking data | 10 blue links, triggered search features (images, maps, Knowledge Panel, People Also Ask) |
+| SERP interaction data | Clicks, hovers, duration on SERP, scroll depth |
+| Query interpretation | Spelling corrections, salient query terms, query suggestions |
+
+NavBoost is a component within Glue that specifically aggregates click-and-query data for the web results on the SERP. "Glue is just another name for Navboost that includes all of the other features on the page" (Nayak testimony).
+
+### Data Sharing Ordered by Court
+
+Judge Mehta ordered Google to share with qualified competitors:
+1. Glue/NavBoost user-side data (click-and-query logs)
+2. RankEmbed training data
+3. Search index data: DocIDs, DocID-to-URL maps, and signals including NavBoost popularity, authoritativeness, first-seen time, last-crawl time, spam score, device-type flag
+
+---
+
+## 15. User Interaction Signals (Court-Confirmed)
+
+### Types of User Interactions Tracked
+
+From "Life of a Click" (UPX0004) and trial testimony:
+
+| Interaction | What Google Learns |
+|-------------|-------------------|
+| Click on result | User interest in that result for that query |
+| Quick return to SERP | Result was unsatisfying ("pogo-sticking" → badClicks) |
+| Long dwell on page | Result was satisfying (→ lastLongestClicks, goodClicks) |
+| Hover over result | Attention signal, even without click |
+| Scroll depth on SERP | How far user looked before finding answer |
+| Carousel swipes | Interest in visual/carousel results |
+| New query entered | Original results didn't satisfy; query reformulation signal |
+| Click on Knowledge Panel | Interest in entity-level information |
+| Multiple clicks in session | Hard query if user clicked 3+ results |
+
+### How Value Judgments Are Derived ("Logging & Ranking", UPX0219)
+
+Logs do NOT contain explicit "this was good/bad" labels. Google must:
+1. Start with small "ground truth" data (human rater labels, CRUST feedback)
+2. Correlate user behavior patterns with ground truth
+3. Derive statistical models: "this is what a user does with a good result"
+4. Apply at scale — "squeeze a fraction of a bit more meaning out of a session, then we get like a billion times that the very next day"
+
+"Growing UX complexity makes feedback progressively harder to convert into accurate value judgments."
+
+---
+
+## 16. Search Quality Dimensions (Court-Confirmed)
+
+From "Ranking for Research" (UPX0204, Nov 2018), Google internally tracks 18+ quality aspects:
+
+| # | Quality Aspect | Notes |
+|---|---------------|-------|
+| 1 | Relevance | Core topicality match |
+| 2 | Page quality | Q* / trustworthiness |
+| 3 | Popularity | P* / Chrome data / clicks |
+| 4 | Freshness | Recency of content |
+| 5 | Localization | Geographic relevance |
+| 6 | Language | Language match |
+| 7 | Centrality | Core topic authority |
+| 8 | Topical diversity | Variety of results |
+| 9 | Personalization | User-specific signals |
+| 10 | Web ecosystem | Health of the web |
+| 11 | Mobile friendly | Mobile usability |
+| 12 | Social fairness | Fair representation |
+| 13 | Optionalization | User choice in results |
+| 14 | Porn demotion | SafeSearch filtering |
+| 15 | Spam | Spam detection/demotion |
+| 16 | Authority | Authoritative sourcing |
+| 17 | Privacy | User data protection |
+| 18 | User control of spell correction | Query interpretation |
